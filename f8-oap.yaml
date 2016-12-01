@@ -1,0 +1,151 @@
+kind: Template
+apiVersion: v1
+labels:
+  version: 1.0.0
+  group: infrastructure
+metadata:
+  annotations:
+    description: Creates a Fabric8 OpenShift Authentication Proxy
+    tags: instant-app,f8-oap,fabric8-oap
+    version: 1.0.0
+  name: f8-oap
+objects:
+- kind: ImageStream
+  apiVersion: v1
+  metadata:
+    name: f8-oap
+- kind: BuildConfig
+  apiVersion: v1
+  metadata:
+    name: f8-oap
+  spec:
+    output:
+      to:
+        kind: ImageStreamTag
+        name: f8-oap:latest
+    source:
+      git:
+        ref: master
+        uri: https://github.com/fabric8io/openshift-auth-proxy
+      type: Git
+    strategy:
+      sourceStrategy:
+        from:
+          kind: ImageStreamTag
+          name: nodejs:4
+          namespace: openshift
+        env:
+        - name: NPM_MIRROR
+          value: http://acme-dev-infra-artifactory.acme.e2e.bos.redhat.com:8081/artifactory/api/npm/npm-org-remote/
+      type: Source
+    triggers:
+    - type: ImageChange
+      type: ConfigChange
+- kind: DeploymentConfig
+  apiVersion: v1
+  metadata:
+    name: f8-oap
+  spec:
+    replicas: 1
+    selector:
+      deploymentconfig: f8-oap
+    template:
+      metadata:
+        labels:
+          deploymentconfig: f8-oap
+      spec:
+        containers:
+        - env:
+          - name: OAP_BACKEND_URL
+            value: http://gogs-acme-dev-infra.apps.acme.e2e.bos.redhat.com/
+          - name: OAP_OAUTH_ID
+            value: f8-oap
+          - name: OAP_PUBLIC_MASTER_URL
+            value: https://acme-ocp3-haproxy-0.acme.e2e.bos.redhat.com:8443/
+          - name: OAP_SERVER_CA_FILE
+            value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          - name: OAP_SESSION_SECRET_FILE
+            value: /var/run/oap/session
+          - name: OAP_MASTER_CA_FILE
+            value: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          - name: OAP_DEBUG
+            value: "true"
+          - name: OAP_OAUTH_SECRET_FILE
+            value: /var/run/oap/oauth-secret
+          - name: OAP_SERVER_TLS_FILE
+            value: /var/run/oap/server-tls.json
+          - name: OAP_SERVER_KEY_FILE
+            value: /var/run/oap/server-key
+          - name: OAP_SERVER_CERT_FILE
+            value: /var/run/oap/server-cert
+          image: " "
+          imagePullPolicy: Always
+          name: f8-oap
+          ports:
+          - containerPort: 3000
+            protocol: TCP
+          resources:
+            limits:
+              cpu: 64m
+              memory: 128Mi
+            requests:
+              cpu: 8m
+              memory: 96Mi
+          volumeMounts:
+          - name: oap-config
+            mountPath: /var/run/oap
+        volumes:
+        - name: oap-config
+          configMap:
+            name: f8-oap
+            items:
+              - key: server-key
+                path: server-key
+              - key: server-cert
+                path: server-cert
+              - key: oauth-secret
+                path: oauth-secret
+              - key: server-tls.json
+                path: server-tls.json
+              - key: session
+                path: session
+              - key: client-secret
+                path: client-secret
+    test: false
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - f8-oap
+        from:
+          kind: ImageStreamTag
+          name: f8-oap:latest
+      type: ImageChange
+    - type: ConfigChange
+- kind: Service
+  apiVersion: v1
+  metadata:
+    name: f8-oap
+  spec:
+    ports:
+    - name: 3000-tcp
+      port: 3000
+      protocol: TCP
+      targetPort: 3000
+    selector:
+      deploymentconfig: f8-oap
+    sessionAffinity: None
+- kind: Route
+  apiVersion: v1
+  metadata:
+    name: f8-oap
+  spec:
+    port:
+      targetPort: 3000-tcp
+    tls:
+      termination: passthrough
+    to:
+      kind: Service
+      name: f8-oap
+      weight: 100
+    wildcardPolicy: None
